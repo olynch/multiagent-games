@@ -12,6 +12,7 @@ from util import manhattanDistance
 from game import Directions
 import random, util, sys
 import pdb
+from Queue import PriorityQueue
 
 from game import Agent
 
@@ -64,37 +65,91 @@ class ReflexAgent(Agent):
         to create a masterful evaluation function.
         """
         # Useful information you can extract from a GameState (pacman.py)
-        print "GAME INFORMATION"
-        successorGameState = currentGameState.generatePacmanSuccessor(action); print repr(successorGameState)
-        pacman = successorGameState.agentStates[0]
-        newPos = successorGameState.getPacmanPosition(); print repr(newPos)
-        newFood = successorGameState.getFood(); print repr(newFood)
-        newGhostStates = successorGameState.getGhostStates(); print repr(newGhostStates)
-        newScaredTimes = [ghostState.scaredTimer for ghostState in newGhostStates]; print repr(newScaredTimes)
+        #print "GAME INFORMATION"
+        #successorGameState = currentGameState.generatePacmanSuccessor(action); print repr(successorGameState)
+        #pacman = successorGameState.agentStates[0]
+        #newPos = successorGameState.getPacmanPosition(); print repr(newPos)
+        #newFood = successorGameState.getFood(); print repr(newFood)
+        #newGhostStates = successorGameState.getGhostStates(); print repr(newGhostStates)
+        #newScaredTimes = [ghostState.scaredTimer for ghostState in newGhostStates]; print repr(newScaredTimes)
 
-        closestGhost = min(newGhostStates, lambda ghost: manhattanDistance(pacman.pos, ghost.pos))
-        ghostDist = manhattanDistance(closestGhost.pos, pacman.pos)
-        ghostFactor = (closestGhost.scaredTimer - ghostDist)
+        #closestGhost = min(newGhostStates, lambda ghost: manhattanDistance(pacman.pos, ghost.pos))
+        #ghostDist = manhattanDistance(closestGhost.pos, pacman.pos)
+        #ghostFactor = (closestGhost.scaredTimer - ghostDist)
 
-        closestFood = (sys.maxint, sys.maxint)
+        #closestFood = (sys.maxint, sys.maxint)
+        #foodDist = sys.maxint
+        #foodCount = 0
+
+        #for i in range(newFood.width):
+            #for j in range(newFood.height):
+                #newDist = manhattanDistance(pacman.pos, (i, j))
+                #if newFood[i][j]:
+                    #foodCount += 1
+                    #if newDist < _foodDist:
+                        #foodDist = newDist
+                        #closestFood = (i, j)
+
+        #if foodDist == sys.maxint:
+            #return foodDist
+
+        
+        #"*** YOUR CODE HERE ***"
+        #return successorGameState.getScore()
+        currentGameState = currentGameState.generateSuccessor(0, action)
+        if currentGameState.isWin():
+            return sys.maxint
+        ghostFactor = sys.maxint
+        foodFactor = sys.maxint
+        powerPelletFactor = sys.maxint
+
+        pacmanPos = currentGameState.getPacmanPosition()
+        ghosts = [(currentGameState.data.agentStates[i], manhattanDistance(pacmanPos, currentGameState.data.agentStates[i].getPosition())) for i in range(1, currentGameState.getNumAgents())]
+        closestGhost = min(ghosts, key = lambda x: x[1])
+        if closestGhost[1] < 6:
+            if closestGhost[0].scaredTimer > 2 * closestGhost[1]: # if we can catch up
+                ghostFactor = 2 * closestGhost[1]
+            elif closestGhost[0].scaredTimer > 1:
+                ghostFactor = sys.maxint
+            else:
+                ghostFactor = -closestGhost[1]
+        
+        numFood = currentGameState.getNumFood()
+
+        capsules = map(lambda x: (x, manhattanDistance(pacmanPos, x)), currentGameState.getCapsules())
+
+        if capsules != []:
+            closestCapsule = min(capsules, key = lambda x: x[1])
+            if ghostFactor > 0:
+                powerPelletFactor = 0.5
+            else:
+                powerPelletFactor = a_star(pacmanPos, closestCapsule[0], currentGameState.getWalls())
+
+        newFood = currentGameState.getFood()
         foodDist = sys.maxint
-        foodCount = 0
 
         for i in range(newFood.width):
             for j in range(newFood.height):
-                newDist = manhattanDistance(pacman.pos, (i, j))
+                newDist = manhattanDistance(pacmanPos, (i, j))
                 if newFood[i][j]:
-                    foodCount += 1
-                    if newDist < _foodDist:
+                    if newDist < foodDist:
                         foodDist = newDist
                         closestFood = (i, j)
 
-        if foodDist == sys.maxint:
-            return foodDist
+        foodDist = a_star(pacmanPos, closestFood, currentGameState.getWalls())
 
-        
-        "*** YOUR CODE HERE ***"
-        return successorGameState.getScore()
+        ghostFactor = ghostFactor if ghostFactor != 0 else sys.maxint
+
+        global layoutFoodCount
+        if layoutFoodCount == 0:
+            for row in currentGameState.data.layout.food:
+                for column in row:
+                    if column:
+                        layoutFoodCount += 1
+
+        foodFactor = layoutFoodCount - numFood
+
+        return (1.0 / ghostFactor) + 1 * foodFactor + (2.0 / foodDist) + (3.0 / powerPelletFactor) + currentGameState.getScore()
 
 def scoreEvaluationFunction(currentGameState):
     """
@@ -121,10 +176,10 @@ class MultiAgentSearchAgent(Agent):
       is another abstract class.
     """
 
-    def nextNode(self, gameState, agentIndex, depth):
-        # returns tuple of (newAgent, newDepth)
+    def nextNode(self, gameState, depth, agentIndex):
+        # returns tuple of (newDepth, newAgent)
         newAgentIndex = agentIndex + 1
-        nextNode = (0, depth + 1) if newAgentIndex >= gameState.getNumAgents() else (newAgentIndex, depth)
+        nextNode = (depth + 1, 0) if newAgentIndex >= gameState.getNumAgents() else (depth, newAgentIndex)
         #print "curNode:(agentIndex: {0}, depth: {1})\nnextNode:(agentIndex: {2}, depth: {3})".format(agentIndex, depth, nextNode[0], nextNode[1])
         return nextNode
 
@@ -158,8 +213,11 @@ class MinimaxAgent(MultiAgentSearchAgent):
         bestScore = -sys.maxint - 1
         bestAction = None
         for action in gameState.getLegalActions(0):
-            if self.getActionValue(gameState.generateSuccessor(0, action), 0, 1) > bestScore:
+            newScore = self.getActionValue(gameState.generateSuccessor(0, action), 1, 1)
+            if newScore > bestScore:
+                bestScore = newScore
                 bestAction = action
+        #pdb.set_trace()
         return bestAction
 
     def getActionValue(self, gameState, depth, agentIndex):
@@ -174,11 +232,11 @@ class MinimaxAgent(MultiAgentSearchAgent):
         else:
             evalFnStr = "continue"
             def evalFn(action):
-                newAgentIndex, newDepth = self.nextNode(gameState, agentIndex, depth)
+                newDepth, newAgentIndex = self.nextNode(gameState, depth, agentIndex)
                 #print newAgentIndex, newDepth
                 return self.getActionValue(gameState.generateSuccessor(agentIndex, action), newDepth, newAgentIndex)
         orderingFn = max if agentIndex == 0 else min
-        print "depth: {0}, agentIndex: {1}, orderingFn: {2}, evalFn: {3}, numAgents: {4}".format(depth, agentIndex, str(orderingFn), evalFnStr, gameState.getNumAgents())
+        #print "depth: {0}, agentIndex: {1}, orderingFn: {2}, evalFn: {3}, numAgents: {4}".format(depth, agentIndex, str(orderingFn), evalFnStr, gameState.getNumAgents())
         return orderingFn(map(evalFn, gameState.getLegalActions(agentIndex)))
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
@@ -191,10 +249,11 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
           Returns the minimax action using self.depth and self.evaluationFunction
         """
         bestAction = None
-        alpha = -sys.maxint - 1
-        beta = sys.maxint
+        alpha = -sys.maxint - 1 # the current value of the best action for maximizer
+        beta = sys.maxint # the current value of the worst action for minimizer
+        #print "numAgents: {0}, depth: {1}".format(gameState.getNumAgents(), self.depth)
         for action in gameState.getLegalActions(0):
-            value = self.getActionValue(gameState.generateSuccessor(0, action), 0, 1, alpha, beta)
+            value = self.getActionValue(gameState.generateSuccessor(0, action), 1, 1, alpha, beta)
             if value > alpha:
                 alpha = value
                 bestAction = action
@@ -203,30 +262,40 @@ class AlphaBetaAgent(MultiAgentSearchAgent):
         return bestAction
 
     def getActionValue(self, gameState, depth, agentIndex, alpha, beta):
+        # define the evalution function
+        if gameState.isWin() or gameState.isLose():
+            return self.evaluationFunction(gameState)
         if depth == self.depth and agentIndex == gameState.getNumAgents() - 1:
             # Base Case
             def evalFn(action, alpha, beta):
-                return self.evaluationFunction(gameState.generateSuccessor(action))
+                return self.evaluationFunction(gameState.generateSuccessor(agentIndex, action))
+            evalFnString = "base case"
         else:
             def evalFn(action, alpha, beta):
                 newDepth, newAgentIndex = self.nextNode(gameState, depth, agentIndex)
-                return self.getActionValue(gameState.generateSuccessor(action), newDepth, newAgentIndex, alpha, beta)
-        if agentIndex == 0:
+                return self.getActionValue(gameState.generateSuccessor(agentIndex, action), newDepth, newAgentIndex, alpha, beta)
+            evalFnString = "recur"
+
+        #print "evalFn: {0}, depth: {1}, agent: {2}\nalpha: {3}, beta: {4}".format(evalFnString, depth, agentIndex, alpha, beta)
+        if agentIndex == 0: # max node
+            value = -sys.maxint - 1
             for action in gameState.getLegalActions(agentIndex):
-                value = evalFn(action, alpha, beta)
-                if value > alpha:
-                    alpha = value
-                if alpha >= beta:
-                    break
-            return alpha
-        else:
+                actionvalue = evalFn(action, alpha, beta)
+                value = value if value > actionvalue else actionvalue
+                if value > beta:
+                    return value
+                alpha = alpha if alpha > value else value
+            return value
+
+        else: # min node
+            value = sys.maxint
             for action in gameState.getLegalActions(agentIndex):
-                value = evalFn(action, alpha, beta)
-                if value < beta:
-                    beta = value
-                if alpha >= beta:
-                    break
-            return beta
+                actionvalue = evalFn(action, alpha, beta)
+                value = value if value < actionvalue else actionvalue
+                if value < alpha:
+                    return value
+                beta = beta if beta < value else value
+            return value
 
 
 class ExpectimaxAgent(MultiAgentSearchAgent):
@@ -245,13 +314,16 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         bestAction = None
         maxValue = -sys.maxint - 1
         for action in gameState.getLegalActions(0):
-            value = self.getActionValue(gameState.generateSuccessor(0, action), 0, 1)
+            value = self.getActionValue(gameState.generateSuccessor(0, action), 1, 1)
             if value > maxValue:
                 bestAction = action
-                maxValue = maxValue
+                maxValue = value
         return bestAction
 
     def getActionValue(self, gameState, depth, agentIndex):
+        if gameState.isWin() or gameState.isLose():
+            #print self.evaluationFunction(gameState)
+            return self.evaluationFunction(gameState)
         if depth == self.depth and agentIndex == gameState.getNumAgents() - 1:
             # base case
             def evalFn(action):
@@ -259,24 +331,114 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         else:
             def evalFn(action):
                 newDepth, newAgentIndex = self.nextNode(gameState, depth, agentIndex)
-                return self.getActionValue(gameState.generateSuccessor(agentIndex), newDepth, newAgentIndex)
-        if agentIndex == 0:
-            return max(map(evalFn, gameState.getLegalActions()))
-        else:
-            return float(sum(map(evalFn, gameState.getLegalActions()))) / len(gameState.getLegalActions())
+                return self.getActionValue(gameState.generateSuccessor(agentIndex, action), newDepth, newAgentIndex)
+        if agentIndex == 0: # max node
+            return max(map(evalFn, gameState.getLegalActions(agentIndex)))
+        else: # average node
+            actions = gameState.getLegalActions(agentIndex)
+            value = float(sum(map(evalFn, actions))) / len(actions)
+            #print value
+            return value
+
+layoutFoodCount = 0
 
 def betterEvaluationFunction(currentGameState):
     """
       Your extreme ghost-hunting, pellet-nabbing, food-gobbling, unstoppable
       evaluation function (question 5).
 
-      DESCRIPTION: <write something here so we know what you did>
+      DESCRIPTION: 
+      Things we need to take into account
+          Distance to ghosts
+          Distance to power pellets
+          Ghost scared timers
+          Food remaining
+          Closest food pellet
+          Closest n food pellets
     """
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    if currentGameState.isWin():
+        return sys.maxint
+    ghostFactor = sys.maxint
+    foodFactor = sys.maxint
+    powerPelletFactor = sys.maxint
+
+    pacmanPos = currentGameState.getPacmanPosition()
+    ghosts = [(currentGameState.data.agentStates[i], manhattanDistance(pacmanPos, currentGameState.data.agentStates[i].getPosition())) for i in range(1, currentGameState.getNumAgents())]
+    closestGhost = min(ghosts, key = lambda x: x[1])
+    if closestGhost[1] < 6:
+        if closestGhost[0].scaredTimer > 2 * closestGhost[1]: # if we can catch up
+            ghostFactor = 2 * closestGhost[1]
+        elif closestGhost[0].scaredTimer > 1:
+            ghostFactor = sys.maxint
+        else:
+            ghostFactor = -closestGhost[1]
+    
+    numFood = currentGameState.getNumFood()
+
+    capsules = map(lambda x: (x, manhattanDistance(pacmanPos, x)), currentGameState.getCapsules())
+
+    if capsules != []:
+        closestCapsule = min(capsules, key = lambda x: x[1])
+        if ghostFactor > 0:
+            powerPelletFactor = 0.5
+        else:
+            powerPelletFactor = a_star(pacmanPos, closestCapsule[0], currentGameState.getWalls())
+
+    newFood = currentGameState.getFood()
+    foodDist = sys.maxint
+
+    for i in range(newFood.width):
+        for j in range(newFood.height):
+            newDist = manhattanDistance(pacmanPos, (i, j))
+            if newFood[i][j]:
+                if newDist < foodDist:
+                    foodDist = newDist
+                    closestFood = (i, j)
+
+    foodDist = a_star(pacmanPos, closestFood, currentGameState.getWalls())
+
+    ghostFactor = ghostFactor if ghostFactor != 0 else sys.maxint
+
+    global layoutFoodCount
+    if layoutFoodCount == 0:
+        for row in currentGameState.data.layout.food:
+            for column in row:
+                if column:
+                    layoutFoodCount += 1
+
+    foodFactor = layoutFoodCount - numFood
+
+    return (1.0 / ghostFactor) + 1 * foodFactor + (2.0 / foodDist) + (3.0 / powerPelletFactor) + currentGameState.getScore()
 
 # Abbreviation
 better = betterEvaluationFunction
+
+def a_star(startpos, endpos, walls):
+    edge = PriorityQueue()
+    popped = Pos(startpos, 0, endpos)
+    while popped.pos != endpos:
+        for elem in popped.getLegalSuccessors(walls):
+            # doesn't have an "extend" method
+            edge.put(elem)
+        popped = edge.get()
+    return popped.steps
+
+class Pos:
+    def __init__(self, pos, steps, endpos):
+        self.pos = pos
+        self.distance = manhattanDistance(self.pos, endpos)
+        self.endpos = endpos
+        self.steps = steps
+    def getLegalSuccessors(self, walls):
+        suc = []
+        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            newPos = (self.pos[0] + dx, self.pos[1] + dy)
+            if not walls[newPos[0]][newPos[1]]:
+                suc.append(Pos(newPos, self.steps + 1, self.endpos))
+        return suc
+    def __cmp__(self, other):
+        return cmp(self.distance + self.steps, other.distance + other.steps)
 
 class ContestAgent(MultiAgentSearchAgent):
     """
